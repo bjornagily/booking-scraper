@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Booking Scraper</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet"/>
+  <style>
+    body { background: #f4f6fa; }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    #results-section { display: none; }
+    .reference-row { background: #fff3cd !important; }
+    .diff-positive { color: #198754; font-weight: 600; }
+    .diff-negative { color: #dc3545; font-weight: 600; }
+    .star { color: #ffc107; }
+    .set-ref-btn { cursor: pointer; font-size: .75rem; }
+    #loader { display: none; }
+    .score-badge { background: #003580; color: #fff; border-radius: 4px; padding: 2px 7px; font-size: .85rem; }
+  </style>
+</head>
+<body>
+<div class="container py-4">
+  <div class="mb-4">
+    <h2 class="fw-bold mb-0">Booking Scraper</h2>
+    <small class="text-muted">Search & compare hotels on Booking.com</small>
+  </div>
+
+  <!-- Search form -->
+  <div class="card mb-4">
+    <div class="card-body">
+      <form id="search-form">
+        <div class="row g-3">
+          <!-- City -->
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">City</label>
+            <input type="text" id="city" class="form-control" placeholder="e.g. Amsterdam" required/>
+          </div>
+          <!-- Check-in -->
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Check-in</label>
+            <input type="date" id="checkin" class="form-control" value="{{ checkin }}" required/>
+          </div>
+          <!-- Check-out -->
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Check-out</label>
+            <input type="date" id="checkout" class="form-control" value="{{ checkout }}" required/>
+          </div>
+          <!-- Adults -->
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Adults</label>
+            <input type="number" id="adults" class="form-control" value="2" min="1" max="10"/>
+          </div>
+          <!-- Rooms -->
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Rooms</label>
+            <input type="number" id="rooms" class="form-control" value="1" min="1" max="10"/>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <hr class="my-3"/>
+        <div class="row g-3">
+          <!-- Stars -->
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Stars</label>
+            <div class="d-flex gap-2 flex-wrap">
+              <% for s in [1,2,3,4,5]: %>
+              {% for s in [1,2,3,4,5] %}
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" name="stars" value="{{ s }}" id="star{{ s }}"/>
+                <label class="form-check-label" for="star{{ s }}">
+                  {{ '★' * s }}
+                </label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Property type -->
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Property Type</label>
+            <div class="d-flex gap-2 flex-wrap">
+              {% for pt in ['Hotel','Apartment','Hostel','Villa','Guest house'] %}
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" name="property_type" value="{{ pt.lower() }}" id="pt{{ loop.index }}"/>
+                <label class="form-check-label" for="pt{{ loop.index }}">{{ pt }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Distance -->
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Distance from centre</label>
+            <select id="distance" class="form-select">
+              <option value="">Any</option>
+              <option value="less_1km">Less than 1 km</option>
+              <option value="less_3km">Less than 3 km</option>
+              <option value="less_5km">Less than 5 km</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-3 mt-1 align-items-end">
+          <div class="col-md-3">
+            <label class="form-label fw-semibold">Max results</label>
+            <input type="number" id="max_results" class="form-control" value="30" min="5" max="100"/>
+          </div>
+          <div class="col-auto">
+            <button type="submit" class="btn btn-primary px-4">
+              <span id="btn-text">Search</span>
+              <span id="loader" class="spinner-border spinner-border-sm ms-1" role="status"></span>
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-alert" class="alert alert-danger d-none"></div>
+
+  <!-- Results -->
+  <div id="results-section">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <span class="fw-bold" id="result-count"></span>
+        <span class="text-muted ms-2 small" id="reference-info"></span>
+      </div>
+      <a href="/export/csv" class="btn btn-outline-success btn-sm">Export CSV</a>
+    </div>
+
+    <div class="card">
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table id="results-table" class="table table-hover mb-0" style="width:100%">
+            <thead class="table-light">
+              <tr>
+                <th>Hotel</th>
+                <th>Type</th>
+                <th>Stars</th>
+                <th>Score</th>
+                <th>Price/night</th>
+                <th>vs. Reference</th>
+                <th>Distance</th>
+                <th>Set ref</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script>
+  let allResults = [];
+  let referenceIndex = null;
+  let dataTable = null;
+
+  document.getElementById('search-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const stars = [...document.querySelectorAll('input[name="stars"]:checked')].map(el => parseInt(el.value));
+    const propertyTypes = [...document.querySelectorAll('input[name="property_type"]:checked')].map(el => el.value);
+
+    const payload = {
+      city: document.getElementById('city').value,
+      checkin: document.getElementById('checkin').value,
+      checkout: document.getElementById('checkout').value,
+      adults: parseInt(document.getElementById('adults').value),
+      rooms: parseInt(document.getElementById('rooms').value),
+      stars,
+      property_types: propertyTypes,
+      distance: document.getElementById('distance').value,
+      max_results: parseInt(document.getElementById('max_results').value),
+    };
+
+    setLoading(true);
+    document.getElementById('error-alert').classList.add('d-none');
+    document.getElementById('results-section').style.display = 'none';
+
+    try {
+      const res = await fetch('/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        showError(data.error || 'Unknown error');
+        return;
+      }
+
+      allResults = data.results;
+      referenceIndex = null;
+      renderTable();
+    } catch (err) {
+      showError('Failed to fetch results: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  function renderTable() {
+    const refPrice = referenceIndex !== null ? allResults[referenceIndex].price_per_night : null;
+    const refName = referenceIndex !== null ? allResults[referenceIndex].name : null;
+
+    document.getElementById('result-count').textContent = `${allResults.length} results`;
+    document.getElementById('reference-info').textContent = refName ? `Reference: ${refName}` : 'Click ☆ to set a reference hotel';
+
+    if (dataTable) {
+      dataTable.destroy();
+    }
+
+    const tbody = document.getElementById('results-body');
+    tbody.innerHTML = '';
+
+    allResults.forEach((h, i) => {
+      const tr = document.createElement('tr');
+      if (i === referenceIndex) tr.classList.add('reference-row');
+
+      const starsHtml = h.stars ? '★'.repeat(h.stars) + '<span class="text-muted">★'.repeat(5 - h.stars) + '</span>' : 'N/A';
+      const scoreHtml = h.score ? `<span class="score-badge">${h.score.toFixed(1)}</span>` : 'N/A';
+      const priceHtml = h.price_per_night
+        ? `${h.currency}${h.price_per_night.toFixed(0)}`
+        : 'N/A';
+
+      let diffHtml = '—';
+      if (refPrice && h.price_per_night && i !== referenceIndex) {
+        const diff = ((h.price_per_night - refPrice) / refPrice) * 100;
+        const sign = diff > 0 ? '+' : '';
+        const cls = diff > 0 ? 'diff-positive' : 'diff-negative';
+        diffHtml = `<span class="${cls}">${sign}${diff.toFixed(1)}%</span>`;
+      } else if (i === referenceIndex) {
+        diffHtml = '<span class="badge bg-warning text-dark">Reference</span>';
+      }
+
+      tr.innerHTML = `
+        <td><a href="${h.url}" target="_blank" class="text-decoration-none fw-semibold">${h.name}</a></td>
+        <td>${h.property_type}</td>
+        <td class="star">${starsHtml}</td>
+        <td>${scoreHtml}</td>
+        <td>${priceHtml}</td>
+        <td>${diffHtml}</td>
+        <td class="text-muted small">${h.distance_from_centre}</td>
+        <td><span class="set-ref-btn" title="Set as reference" onclick="setReference(${i})">${i === referenceIndex ? '★' : '☆'}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    dataTable = new DataTable('#results-table', {
+      paging: true,
+      pageLength: 25,
+      order: [[4, 'asc']],
+      columnDefs: [{ orderable: false, targets: [7] }],
+      language: { search: 'Filter:' },
+    });
+
+    document.getElementById('results-section').style.display = 'block';
+  }
+
+  function setReference(index) {
+    referenceIndex = referenceIndex === index ? null : index;
+    renderTable();
+  }
+
+  function setLoading(on) {
+    document.getElementById('loader').style.display = on ? 'inline-block' : 'none';
+    document.getElementById('btn-text').textContent = on ? 'Scraping…' : 'Search';
+    document.querySelector('button[type="submit"]').disabled = on;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-alert');
+    el.textContent = msg;
+    el.classList.remove('d-none');
+  }
+</script>
+</body>
+</html>
