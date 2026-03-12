@@ -219,7 +219,7 @@ async def _collect_results(
 
     for _ in range(5):
         cards = await page.query_selector_all("[data-testid='property-card']")
-        progress(f"Collecting results… ({len(hotels)}/{max_results} found so far)")
+        progress(f"Collecting results… ({len(hotels)}/{max_results} found so far, {len(cards)} cards on page)")
 
         for card in cards:
             try:
@@ -310,7 +310,8 @@ async def _collect_results(
                 if len(hotels) >= max_results:
                     return hotels
 
-            except Exception:
+            except Exception as e:
+                progress(f"Card error: {type(e).__name__}: {e}")
                 continue
 
         # Load more / scroll
