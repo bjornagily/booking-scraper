@@ -14,4 +14,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # 1 worker — scraper is CPU/memory heavy; threading handles concurrency internally
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "180", "app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --timeout 180 app:app"]
