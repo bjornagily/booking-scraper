@@ -1,12 +1,14 @@
 import asyncio
 import os
 import re
+import tempfile
 from dataclasses import dataclass, asdict
 from typing import Callable
 from playwright.async_api import async_playwright, Page
 
 # On Railway/Docker use headless=True; locally keep headed to avoid bot detection
 HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
+CAPSOLVER_KEY = os.environ.get("CAPSOLVER_API_KEY", "")
 
 
 PROPERTY_TYPE_IDS = {
@@ -155,27 +157,43 @@ async def scrape(
         breakfast_filter=breakfast_filter,
     )
 
+    launch_args = [
+        "--window-size=1440,900",
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+    ]
+    context_kwargs = dict(
+        viewport={"width": 1440, "height": 900},
+        locale="en-GB",
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+    )
+
     async with async_playwright() as p:
         progress("Launching browser…")
-        browser = await p.chromium.launch(
-            headless=HEADLESS,
-            args=[
-                "--window-size=1440,900",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        context = await browser.new_context(
-            viewport={"width": 1440, "height": 900},
-            locale="en-GB",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-        )
-        # Remove webdriver fingerprint
+
+        if CAPSOLVER_KEY:
+            from capsolver_extension_python import Capsolver
+            ext_path = Capsolver(api_key=CAPSOLVER_KEY).load(with_command_line_option=False)
+            launch_args += [
+                f"--disable-extensions-except={ext_path}",
+                f"--load-extension={ext_path}",
+            ]
+            user_data_dir = tempfile.mkdtemp(prefix="pw-profile-")
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                headless=HEADLESS,
+                args=launch_args,
+                **context_kwargs,
+            )
+        else:
+            browser = await p.chromium.launch(headless=HEADLESS, args=launch_args)
+            context = await browser.new_context(**context_kwargs)
+
         await context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
@@ -194,14 +212,14 @@ async def scrape(
 
         progress("Waiting for results…")
         try:
-            await page.wait_for_selector("[data-testid='property-card']", timeout=15000)
+            await page.wait_for_selector("[data-testid='property-card']", timeout=20000)
         except Exception:
             progress("No results found or page timed out.")
-            await browser.close()
+            await context.close()
             return []
 
         hotels = await _collect_results(page, max_results, max_km, available_only, progress)
-        await browser.close()
+        await context.close()
 
     progress(f"Done — found {len(hotels)} properties.")
     return [asdict(h) for h in hotels]
